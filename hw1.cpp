@@ -1,6 +1,7 @@
 #include <iostream>
 #include <stack>
 #include <queue>
+#include <set>
 
 class GameState {
 	public:
@@ -76,7 +77,7 @@ class GameState {
 			depth = 0;
 		}
 		GameState(GameState *argParent, int *argAction) {
-			int stepCost = 0; // Or might this be a float? Probably not.
+			int stepCost = 1; // Or might this be a float? Probably not.
 			if (argParent->LBank[2] == 1) {
 				LBank[0] = argParent->LBank[0] - argAction[0];
 				LBank[1] = argParent->LBank[1] - argAction[1];
@@ -122,6 +123,16 @@ class GameState {
 
 
 
+GameState *GraphSearch(GameState *goal) {
+
+	GameState *solution;
+
+	std::set<GameState*> close; // Is this one to one?
+
+
+	return solution;
+
+}
 
 
 
