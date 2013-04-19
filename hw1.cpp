@@ -2,9 +2,65 @@
 #include <stack>
 #include <queue>
 #include <set>
+#include <cmath>
+#include <iomanip>
+#include <fstream>
 
 class GameState {
-	public:
+	public:     
+        class PtrComp {
+            int max;
+            public:
+                PtrComp(int maxArg) { max = maxArg; }
+                bool operator() (GameState *left, GameState *right) const {
+                    double lt = 0;
+                    double rt = 0;
+                    for(int i = 0; i < 3; i++) {
+                        lt += left->LBank[i] * pow(max,i);
+                        rt += right->LBank[i] * pow(max,i);
+                    }
+                    return lt > rt; 
+                }
+        };
+
+
+        class SearchToggleComp {
+            int key;
+            
+            public:
+                SearchToggleComp(int keyArg) {
+                    key = keyArg;
+                }
+
+                bool operator() (GameState *left, GameState *right) {
+                    if (key == 0) return true; // Makes this a stack
+                    if (key == 1) return false; // Makes this a queue
+                    
+                    // Otherwise return a comparison of path costs?
+                    // This will make it a priority_queue
+                    return (left->pathCost + left->RBank[0] + left->RBank[1] - 1) > (right->pathCost + right->RBank[0] + right->RBank[1] - 1);
+
+                }
+
+        };
+        typedef std::priority_queue<GameState*,std::vector<GameState*>,SearchToggleComp> Fringe;
+
+		int LBank[3]; //state
+		int RBank[3]; //state
+		int action[2];
+		GameState *parent; //parentNode
+		int pathCost; //pathcost of parent + stepcost
+		int depth; //depth
+		
+        bool operator== (GameState other) {
+            bool equals = true;
+            
+            equals = equals && (LBank[1] == other.LBank[1]) && (RBank[1] == other.RBank[1]);
+            equals = equals && (LBank[2] == other.LBank[2]) && (RBank[2] == other.RBank[2]);
+            equals = equals && (LBank[3] == other.LBank[3]) && (RBank[3] == other.RBank[3]);
+
+            return equals;
+        }
 
 		static bool isValid(GameState *state, int *argAction) { // No negative numbers, m >= c everywhere
 			bool valid = true;
@@ -46,28 +102,20 @@ class GameState {
 		}
 
 
-		static std::queue<GameState*> expand(GameState *node) { // Does this need the goal state or some other "problem" state thing?
-			std::queue<GameState*> successors;
+		static void expand(GameState *node, GameState::Fringe *fringe) { // Does this need the goal state or some other "problem" state thing?
 			int actions[5][2] = {{1,0},{2,0},{0,1},{1,1},{0,2}};
 		
 			for (int i = 0; i < 5; i++) {	
 				if (isValid(node, actions[i])) {
-					successors.push(new GameState(node,actions[i])); // Memory leak. Oh God memory leak. o_o
-				}
+					fringe->push(new GameState(node,actions[i])); // Memory leak. Oh God memory leak. o_o
+                }
 			}			
 			
-			return successors;
 
 		}
 
 
 
-		int LBank[3]; //state
-		int RBank[3]; //state
-		int action[2];
-		GameState *parent; //parentNode
-		int pathCost; //pathcost of parent + stepcost
-		int depth; //depth
 		
 		GameState(int lm, int lc, int lb, int rm, int rc, int rb) { 
 			LBank[0] = lm; LBank[1] = lc; LBank[2] = lb;
@@ -75,6 +123,7 @@ class GameState {
 			action[0] = 0; action[1] = 0;
 			pathCost = 0;
 			depth = 0;
+            parent = NULL;
 		}
 		GameState(GameState *argParent, int *argAction) {
 			int stepCost = 1; // Or might this be a float? Probably not.
@@ -110,26 +159,73 @@ class GameState {
 		// Need a better show function...
 		// Also, we need a close list and heuristic stuffs, and other things of the sort. IE: graphSearch ^_^
 
-		void showStuffs() {
+		void showStuffs(std::ofstream *out) {
 			// Note: this is temporary.
-			
-			std::cout << "\n\nAction: Move " << action[0] << " missionaries and " << action[1] << " cannibals." << std::endl;
-			std::cout << "\tLeft Bank: \nMissionaries: " << LBank[0] << "\nCannibals: " << LBank[1] << "\nBoat: " << LBank[2] << std::endl;
-			std::cout << "\tRight Bank: \nMissionaries: " << RBank[0] << "\nCannibals: " << RBank[1] << "\nBoat: " << RBank[2] << std::endl << std::endl;
+		
+            (*out) << "Move " << std::setw(4) << pathCost << ": ";
+            (*out) << "Left: " << std::setw(3) << LBank[0] << " " << std::setw(3) << LBank[1] << " " << LBank[2] << " ";
+            (*out) << "Right: "<< std::setw(3) << RBank[0] << " " << std::setw(3) << RBank[1] << " " << RBank[2] << " ";
+            (*out) << "Action: "<< action[0] << " " << action[1] << std::endl;
 
 		}
 
 }; 
 
 
+        class PtrComp {
 
-GameState *GraphSearch(GameState *goal) {
+            public:
+                bool operator() (GameState *left, GameState *right) {
+                    return (*left) == (*right);
+                }
+        };
 
+
+GameState *GraphSearch(GameState *initial, GameState *goal, GameState::Fringe *fringe, int *expandedNodes, bool iterativeDeepening) {
+    // Somewhere in here we need to keep track of expanded nodes, right?
 	GameState *solution;
 
-	std::set<GameState*> close; // Is this one to one?
+	std::set<GameState*,GameState::PtrComp> close(initial->LBank[0] + initial->RBank[0] + 1); // Can't get hash to work, so this will do for now.
+
+	fringe->push(initial);
+
+	GameState *node;
+    std::set<GameState*>::iterator found;
+
+    int iterativeDepth = 0;
+
+	while(true) { // change this later?
+        if (fringe->empty()) {
+            return NULL; 
+		}
+		
+		node = fringe->top(); fringe->pop();
+
+        if (iterativeDeepening && node->pathCost >= iterativeDepth) {
+            iterativeDepth++;
+            close.clear();
+            fringe->push(initial);
+            continue;
+        }
 
 
+		if (*node == *goal) {
+			return node;
+		}
+
+        (*expandedNodes)++;
+        
+        found = close.find(node);
+		if (found != close.end() && (*found)->pathCost > node->pathCost) {
+            close.erase(found);
+        }
+
+        if (close.count(node) == 0) { // Need to add in checking path cost to break ties, right?
+			close.insert(node);
+			GameState::expand(node,fringe);
+		}
+
+    }
 	return solution;
 
 }
@@ -139,28 +235,64 @@ GameState *GraphSearch(GameState *goal) {
 
 int main(int argc, char *args[]) {
 
-	GameState initial(0,0,0,3,3,1);
-	initial.showStuffs();
+    int initArray[6];
+    int goalArray[6];
+    std::ifstream initFile;
+    std::ifstream goalFile;
+    
+    initFile.open(args[1]);
+    goalFile.open(args[2]);
+   
+    for (int i = 0; i < 6; i++) {
+        initFile >> initArray[i];
+        goalFile >> goalArray[i];
+        initFile.get();
+        goalFile.get();
+    }
+    
+    initFile.close();
+    goalFile.close();
 
-	std::queue<GameState*> childrens = GameState::expand(&initial);
+	GameState initial(initArray[0],initArray[1],initArray[2],initArray[3],initArray[4],initArray[5]);
+    GameState goal(goalArray[0],goalArray[1],goalArray[2],goalArray[3],goalArray[4],goalArray[5]);
+    
+    
+    GameState *solution;
+    int expandedNodes = 0;	
+    GameState::Fringe dfs_fringe(0);
+    GameState::Fringe bfs_fringe(1);
+    GameState::Fringe iddfs_fringe(0);
+    GameState::Fringe astar_fringe(2);
 
 
-	while (childrens.empty() == false) {
-
-
-		childrens.front()->showStuffs();
-		
-		std::queue<GameState*> grandchildrens = GameState::expand(childrens.front());
-	
-		while (grandchildrens.empty() == false) {
-			grandchildrens.front()->showStuffs();
-			grandchildrens.pop();
-		}
-
-		childrens.pop();
-	} 
-
-
+    if (args[3][0] == 'd') {
+        solution = GraphSearch(&initial,&goal,&dfs_fringe,&expandedNodes,false);
+    } 
+    else if (args[3][0] == 'b') {
+        solution = GraphSearch(&initial,&goal,&bfs_fringe,&expandedNodes,false);
+    } 
+    else if (args[3][0] == 'i') {
+        solution = GraphSearch(&initial,&goal,&iddfs_fringe,&expandedNodes,true);
+    } 
+    else {
+        solution = GraphSearch(&initial,&goal,&astar_fringe,&expandedNodes,false);
+    } 
+    
+    if(solution){
+        std::ofstream outputfile;
+        outputfile.open(args[4]);
+        solution->showStuffs(&outputfile);
+        while(solution->parent) {
+            solution = solution->parent;
+            solution->showStuffs(&outputfile);
+        }
+        outputfile << "Expanded Nodes: " << expandedNodes << std::endl;
+        outputfile.close();
+    }
+    else {
+        std::cout<< "No solution\n";
+        return 1;
+    }
 	return 0;
 
 }
